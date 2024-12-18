@@ -13,6 +13,7 @@ import SwiftSyntaxMacros
 extension BuilderBodyGenerator.Configuration {
     static let throwing = Self(flavour: .throwing)
     static let fluent = Self(flavour: .fluent)
+    static let storage = Self(flavour: .storage)
 }
 
 struct BuilderBodyGenerator {
@@ -30,6 +31,7 @@ struct BuilderBodyGenerator {
             case plain
             case throwing
             case fluent
+            case storage
         }
 
         let flavour: Flavour
@@ -63,6 +65,11 @@ struct BuilderBodyGenerator {
             )
         case .fluent:
             generateFluentBody(
+                memberName: memberName,
+                vars: declaration.typedMembers
+            )
+        case .storage:
+            generateStorageBody(
                 memberName: memberName,
                 vars: declaration.typedMembers
             )
@@ -162,6 +169,75 @@ extension BuilderBodyGenerator {
         \(raw: makeBuilderDecl())
         """
         ]
+    }
+    
+    fileprivate func generateStorageBody(
+        memberName: String,
+        vars: [TypedVariable]
+    ) -> [DeclSyntax] {//todo make these private variables for the fluent one
+        ["""
+        fileprivate final class Storage {
+        \(raw: vars.publicVariables)
+        public init() {}
+        
+        \(raw: convenienceInitDecl(memberName: memberName))
+
+        public func fill(with item: \(raw: memberName)?) {
+            \(raw: vars.fillAssignments)
+        }
+        
+        \(raw: vars.fluentFunctions)
+        
+        public func build() -> \(raw: memberName)? {
+            \(raw: vars.buildGuards)
+            return \(raw: memberName)(
+            \(raw: vars.initAssignments)
+            )
+        }
+        }
+        
+        public func copy() -> Storage {
+            \(raw: vars.buildGuards)
+            return Storage(
+            \(raw: vars.initAssignments)
+            )
+        }
+        }
+        
+        private mutating func ensureUniqueness() {
+            guard !isKnownUniquelyReferenced(&storage) else { return }
+            storage = storage.copy()
+        }
+        
+        \(raw: makeBuilderDecl())
+        """
+        ]
+    }
+    
+    func generateAccessor(
+        providingAccessorsOf declaration: any DeclSyntaxProtocol
+    ) -> [AccessorDeclSyntax] {
+        guard let property = declaration.as(VariableDeclSyntax.self),
+          property.isValidForPerception,
+          let identifier = property.identifier?.trimmed
+        else {
+          return []
+        }
+        
+        let getAccessor: AccessorDeclSyntax =
+          """
+          get {
+          storage.\(identifier)
+          }
+          """
+
+        let setAccessor: AccessorDeclSyntax =
+          """
+          set {
+          storage.\(identifier) = newValue
+          }
+          """
+        return [getAccessor, setAccessor]
     }
 
     
@@ -293,4 +369,179 @@ extension BuilderBodyGenerator.Error: CustomStringConvertible {
             return "Unable not find declaration name for type"
         }
     }
+}
+
+extension DeclModifierListSyntax {
+  func privatePrefixed(_ prefix: String) -> DeclModifierListSyntax {
+    let modifier: DeclModifierSyntax = DeclModifierSyntax(name: "private", trailingTrivia: .space)
+    return [modifier]
+      + filter {
+        switch $0.name.tokenKind {
+        case .keyword(let keyword):
+          switch keyword {
+          case .fileprivate, .private, .internal, .package, .public:
+            return false
+          default:
+            return true
+          }
+        default:
+          return true
+        }
+      }
+  }
+
+  init(keyword: Keyword) {
+    self.init([DeclModifierSyntax(name: .keyword(keyword))])
+  }
+}
+
+
+extension VariableDeclSyntax {
+  func privatePrefixed(_ prefix: String, addingAttribute attribute: AttributeSyntax)
+    -> VariableDeclSyntax
+  {
+    let newAttributes = attributes + [.attribute(attribute)]
+    return VariableDeclSyntax(
+      leadingTrivia: leadingTrivia,
+      attributes: newAttributes,
+      modifiers: modifiers.privatePrefixed(prefix),
+      bindingSpecifier: TokenSyntax(
+        bindingSpecifier.tokenKind, leadingTrivia: .space, trailingTrivia: .space,
+        presence: .present),
+      bindings: bindings.privatePrefixed(prefix),
+      trailingTrivia: trailingTrivia
+    )
+  }
+
+  var isValidForPerception: Bool {
+    !isComputed && isInstance && !isImmutable && identifier != nil
+  }
+}
+
+extension PatternBindingListSyntax {
+  func privatePrefixed(_ prefix: String) -> PatternBindingListSyntax {
+    var bindings = self.map { $0 }
+    for index in 0..<bindings.count {
+      let binding = bindings[index]
+      if let identifier = binding.pattern.as(IdentifierPatternSyntax.self) {
+        bindings[index] = PatternBindingSyntax(
+          leadingTrivia: binding.leadingTrivia,
+          pattern: IdentifierPatternSyntax(
+            leadingTrivia: identifier.leadingTrivia,
+            identifier: identifier.identifier.privatePrefixed(prefix),
+            trailingTrivia: identifier.trailingTrivia
+          ),
+          typeAnnotation: binding.typeAnnotation,
+          initializer: binding.initializer,
+          accessorBlock: binding.accessorBlock,
+          trailingComma: binding.trailingComma,
+          trailingTrivia: binding.trailingTrivia)
+
+      }
+    }
+
+    return PatternBindingListSyntax(bindings)
+  }
+}
+
+extension TokenSyntax {
+  func privatePrefixed(_ prefix: String) -> TokenSyntax {
+    switch tokenKind {
+    case .identifier(let identifier):
+      return TokenSyntax(
+        .identifier(prefix + identifier), leadingTrivia: leadingTrivia,
+        trailingTrivia: trailingTrivia, presence: presence)
+    default:
+      return self
+    }
+  }
+}
+
+extension VariableDeclSyntax {
+  var identifierPattern: IdentifierPatternSyntax? {
+    bindings.first?.pattern.as(IdentifierPatternSyntax.self)
+  }
+
+  var isInstance: Bool {
+    for modifier in modifiers {
+      for token in modifier.tokens(viewMode: .all) {
+        if token.tokenKind == .keyword(.static) || token.tokenKind == .keyword(.class) {
+          return false
+        }
+      }
+    }
+    return true
+  }
+
+  var identifier: TokenSyntax? {
+    identifierPattern?.identifier
+  }
+
+  var type: TypeSyntax? {
+    bindings.first?.typeAnnotation?.type
+  }
+
+  func accessorsMatching(_ predicate: (TokenKind) -> Bool) -> [AccessorDeclSyntax] {
+    let accessors: [AccessorDeclListSyntax.Element] = bindings.compactMap { patternBinding in
+      switch patternBinding.accessorBlock?.accessors {
+      case .accessors(let accessors):
+        return accessors
+      default:
+        return nil
+      }
+    }.flatMap { $0 }
+    return accessors.compactMap { accessor in
+      predicate(accessor.accessorSpecifier.tokenKind) ? accessor : nil
+    }
+  }
+
+  var willSetAccessors: [AccessorDeclSyntax] {
+    accessorsMatching { $0 == .keyword(.willSet) }
+  }
+  var didSetAccessors: [AccessorDeclSyntax] {
+    accessorsMatching { $0 == .keyword(.didSet) }
+  }
+
+  var isComputed: Bool {
+    if accessorsMatching({ $0 == .keyword(.get) }).count > 0 {
+      return true
+    } else {
+      return bindings.contains { binding in
+        if case .getter = binding.accessorBlock?.accessors {
+          return true
+        } else {
+          return false
+        }
+      }
+    }
+  }
+
+  var isImmutable: Bool {
+    return bindingSpecifier.tokenKind == .keyword(.let)
+  }
+
+  func isEquivalent(to other: VariableDeclSyntax) -> Bool {
+    if isInstance != other.isInstance {
+      return false
+    }
+    return identifier?.text == other.identifier?.text
+  }
+
+  var initializer: InitializerClauseSyntax? {
+    bindings.first?.initializer
+  }
+
+  func hasMacroApplication(_ name: String) -> Bool {
+    for attribute in attributes {
+      switch attribute {
+      case .attribute(let attr):
+        if attr.attributeName.tokens(viewMode: .all).map({ $0.tokenKind }) == [.identifier(name)] {
+          return true
+        }
+      default:
+        break
+      }
+    }
+    return false
+  }
 }

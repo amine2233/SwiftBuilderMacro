@@ -18,3 +18,10 @@ public macro FluentBuilder() = #externalMacro(
     module: "BuilderMacroMacros",
     type: "FluentBuilderMacro"
 )
+
+/// A macro that produces FluentBuilder
+@attached(member, names: arbitrary)
+public macro StorageBuilder() = #externalMacro(
+    module: "BuilderMacroMacros",
+    type: "StorageBuilderMacro"
+)

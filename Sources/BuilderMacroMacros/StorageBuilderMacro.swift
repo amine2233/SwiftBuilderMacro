@@ -3,7 +3,7 @@ import SwiftSyntax
 import SwiftSyntaxBuilder
 import SwiftSyntaxMacros
 
-public struct BuilderMacro: MemberMacro {
+public struct StorageBuilderMacro: MemberMacro {
     enum Error: Swift.Error {
         case wrongDeclarationSyntax
     }
@@ -24,27 +24,7 @@ public struct BuilderMacro: MemberMacro {
             return []
         }
 
-        let bodyGenerator = BuilderBodyGenerator()
+        let bodyGenerator = BuilderBodyGenerator(configuration: .storage)
         return try bodyGenerator.generateBody(from: declaration)
-    }
-}
-
-
-@main
-struct BuilderMacroPlugin: CompilerPlugin {
-    let providingMacros: [Macro.Type] = [
-        BuilderMacro.self,
-        ThrowingBuilderMacro.self,
-        FluentBuilderMacro.self,
-        StorageBuilderMacro.self
-    ]
-}
-
-extension BuilderMacro.Error: CustomStringConvertible {
-    var description: String {
-        switch self {
-        case .wrongDeclarationSyntax:
-            return "Builder Macro supports only structs"
-        }
     }
 }
