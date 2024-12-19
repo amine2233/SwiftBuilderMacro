@@ -176,7 +176,46 @@ extension BuilderBodyGenerator {
         vars: [TypedVariable]
     ) -> [DeclSyntax] {//todo make these private variables for the fluent one
         ["""
+        fileprivate var storage = Storage()
+        
         fileprivate final class Storage {
+        \(raw: vars.internalVariables)
+        init() {}
+        
+        \(raw: convenienceInternalInitDecl(memberName: memberName))
+        
+        init(
+        \(raw: vars.initAssignments3)
+        ) {
+        \(raw: vars.initAssignments4)
+        }
+
+        func fill(with item: \(raw: memberName)?) {
+            \(raw: vars.fillAssignments)
+        }
+        
+        \(raw: vars.fluentFunctions)
+        
+        func build() -> \(raw: memberName)? {
+            \(raw: vars.buildGuards)
+            return \(raw: memberName)(
+            \(raw: vars.initAssignments)
+            )
+        }
+        
+        func copy() -> Storage {
+            return Storage(
+            \(raw: vars.initAssignments2)
+            )
+        }
+        }
+
+        private mutating func ensureUniqueness() {
+            guard !isKnownUniquelyReferenced(&storage) else { return }
+            storage = storage.copy()
+        }
+        
+        public class Builder {
         \(raw: vars.publicVariables)
         public init() {}
         
@@ -194,19 +233,6 @@ extension BuilderBodyGenerator {
             \(raw: vars.initAssignments)
             )
         }
-        }
-        
-        public func copy() -> Storage {
-            \(raw: vars.buildGuards)
-            return Storage(
-            \(raw: vars.initAssignments)
-            )
-        }
-        }
-        
-        private mutating func ensureUniqueness() {
-            guard !isKnownUniquelyReferenced(&storage) else { return }
-            storage = storage.copy()
         }
         
         \(raw: makeBuilderDecl())
@@ -250,6 +276,15 @@ extension BuilderBodyGenerator {
         """
     }
     
+    private func convenienceInternalInitDecl(memberName: String) -> String {
+        """
+        convenience init(_ item: \(memberName)?) {
+            self.init()
+            fill(with: item)
+        }
+        """
+    }
+    
     private func makeBuilderDecl() -> String {
         """
         public static func makeBuilder() -> Builder {
@@ -269,6 +304,11 @@ extension [BuilderBodyGenerator.TypedVariable] {
     
     var publicVariables: String {
         map(\.publicOptionalVarDefinition)
+        .joined(separator: "\n")
+    }
+    
+    var internalVariables: String {
+        map(\.internalOptionalVarDefinition)
         .joined(separator: "\n")
     }
 
@@ -296,6 +336,21 @@ extension [BuilderBodyGenerator.TypedVariable] {
         map(\.initAssignment)
         .joined(separator: ",\n")
     }
+    
+    var initAssignments2: String {
+        map(\.initAssignment2)
+        .joined(separator: ",\n")
+    }
+    
+    var initAssignments3: String {
+        map(\.initAssignment3)
+        .joined(separator: ",\n")
+    }
+    
+    var initAssignments4: String {
+        map(\.initAssignment4)
+        .joined(separator: "\n")
+    }
 }
 
 extension BuilderBodyGenerator.TypedVariable {
@@ -311,9 +366,25 @@ extension BuilderBodyGenerator.TypedVariable {
         ? "\(name): \(name) ?? UUID()"
         : "\(name): \(name)"
     }
+    
+    var initAssignment2: String {
+        "\(name): self.\(name)"
+    }
+    
+    var initAssignment3: String {
+        "\(name): \(optionalType)"
+    }
+    
+    var initAssignment4: String {
+        "self.\(name) = \(name)"
+    }
 
     var publicOptionalVarDefinition: String {
         "public var \(name): \(optionalType)"
+    }
+    
+    var internalOptionalVarDefinition: String {
+        "var \(name): \(optionalType)"
     }
     
     var throwingGuardCheck: String? {

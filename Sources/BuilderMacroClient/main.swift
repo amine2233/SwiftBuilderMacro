@@ -47,7 +47,6 @@ builder.duration = 60
 
 print(String(describing: builder.build()))
 
-@FluentBuilder
 @StorageBuilder
 struct Home {
     let uuid: UUID
