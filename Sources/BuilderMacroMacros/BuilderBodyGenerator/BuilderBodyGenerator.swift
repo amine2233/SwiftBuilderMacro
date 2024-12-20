@@ -73,6 +73,8 @@ struct BuilderBodyGenerator {
                 memberName: memberName,
                 vars: declaration.typedMembers
             )
+            +
+            generateAccessor(providingAccessorsOf: declaration)
         }
     }
 }
@@ -241,13 +243,13 @@ extension BuilderBodyGenerator {
     }
     
     func generateAccessor(
-        providingAccessorsOf declaration: any DeclSyntaxProtocol
-    ) -> [AccessorDeclSyntax] {
+        providingAccessorsOf declaration: any DeclGroupSyntax //DeclSyntaxProtocol
+    ) -> [DeclSyntax] {
         guard let property = declaration.as(VariableDeclSyntax.self),
           property.isValidForPerception,
           let identifier = property.identifier?.trimmed
         else {
-          return []
+          return [""]
         }
         
         let getAccessor: AccessorDeclSyntax =
@@ -263,7 +265,7 @@ extension BuilderBodyGenerator {
           storage.\(identifier) = newValue
           }
           """
-        return [getAccessor, setAccessor]
+        return [getAccessor, setAccessor].map { DeclSyntax($0) }
     }
 
     
