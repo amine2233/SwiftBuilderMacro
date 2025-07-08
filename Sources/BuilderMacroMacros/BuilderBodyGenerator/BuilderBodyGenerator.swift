@@ -69,12 +69,16 @@ struct BuilderBodyGenerator {
                 vars: declaration.typedMembers
             )
         case .storage:
+//            declaration.memberBlock.members.flatMap {
+//                generateAccessor(
+//                    providingAccessorsOf: $0
+//                )
+//            }
+//            +
             generateStorageBody(
                 memberName: memberName,
                 vars: declaration.typedMembers
             )
-            +
-            generateAccessor(providingAccessorsOf: declaration)
         }
     }
 }
@@ -196,7 +200,7 @@ extension BuilderBodyGenerator {
             \(raw: vars.fillAssignments)
         }
         
-        \(raw: vars.fluentFunctions)
+        \(raw: vars.storageFunctions)
         
         func build() -> \(raw: memberName)? {
             \(raw: vars.buildGuards)
@@ -227,7 +231,7 @@ extension BuilderBodyGenerator {
             \(raw: vars.fillAssignments)
         }
         
-        \(raw: vars.fluentFunctions)
+        \(raw: vars.storageFunctions)
         
         public func build() -> \(raw: memberName)? {
             \(raw: vars.buildGuards)
@@ -243,10 +247,9 @@ extension BuilderBodyGenerator {
     }
     
     func generateAccessor(
-        providingAccessorsOf declaration: any DeclGroupSyntax //DeclSyntaxProtocol
+        providingAccessorsOf declaration: any SyntaxProtocol //DeclSyntaxProtocol
     ) -> [DeclSyntax] {
-        guard let property = declaration.as(VariableDeclSyntax.self),
-          property.isValidForPerception,
+        guard var property = declaration.as(MemberBlockItemSyntax.self)?.decl.as(VariableDeclSyntax.self),
           let identifier = property.identifier?.trimmed
         else {
           return [""]
@@ -301,6 +304,11 @@ extension [BuilderBodyGenerator.TypedVariable] {
     
     var fluentFunctions: String {
         map(\.fluentFunctionDefinition)
+        .joined(separator: "\n\n")
+    }
+    
+    var storageFunctions: String {
+        map(\.storageFunctionDefinition)
         .joined(separator: "\n\n")
     }
     
@@ -404,6 +412,15 @@ extension BuilderBodyGenerator.TypedVariable {
     var fluentFunctionDefinition: String {
         """
         public func \(name)(_ \(name): \(optionalType)) -> Self {
+            self.\(name) = \(name)
+            return self
+        }
+        """
+    }
+    
+    var storageFunctionDefinition: String {
+        """
+        public func with\(name.capitalizingFirstLetter())(_ \(name): \(optionalType)) -> Self {
             self.\(name) = \(name)
             return self
         }
